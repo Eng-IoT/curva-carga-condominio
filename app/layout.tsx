@@ -1,15 +1,9 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Curva de Carga para Condomínios",
-  description: "Simulador de demanda e recarga inteligente para carregadores de veículos elétricos em condomínios."
-};
-
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  themeColor: "#07121f"
+  title: "Curva de Carga para Condomínios V2",
+  description: "Curva medida, simulação EV, dimensionamento elétrico e relatório técnico PDF."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
