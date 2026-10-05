@@ -1,187 +1,130 @@
-export type SimulationInputs = {
-  apartments: number;
-  commonPeakKw: number;
-  diversifiedUnitKw: number;
-  contractedDemandKw: number;
-  chargerPowerKw: number;
-  chargerCount: number;
-  simultaneity: number;
-  reserveMargin: number;
-  peakStart: number;
-  peakEnd: number;
-  loadBalancing: boolean;
-  offPeakScheduling: boolean;
-  manualBaseProfile: number[] | null;
-};
+import { hourlyToQuarter } from "./curve";
+import type { CurveProfile, EvInputs, EvSimulationResult } from "./types";
 
-export type SimulationResult = {
-  hours: number[];
-  base: number[];
-  evUnmanaged: number[];
-  totalUnmanaged: number[];
-  evManaged: number[];
-  totalManaged: number[];
-  contracted: number[];
-  basePeak: number;
-  unmanagedPeak: number;
-  managedPeak: number;
-  requiredDemandNoManagement: number;
-  criticalHour: number;
-  unmanagedExceededHours: number[];
-  managedExceededHours: number[];
-  peakReductionPercent: number;
-  availableAtBasePeak: number;
-  maxSafeSimultaneousChargers: number;
-  maxSafeSimultaneity: number;
-  evEnergyRequestedKwh: number;
-  evEnergyDeliveredKwh: number;
-  curtailedEnergyKwh: number;
-  withinLimit: boolean;
-};
-
-const BASE_SHAPE = [
-  0.30, 0.27, 0.25, 0.24, 0.25, 0.30,
-  0.45, 0.62, 0.70, 0.68, 0.64, 0.61,
-  0.60, 0.62, 0.66, 0.73, 0.84, 0.94,
-  1.00, 0.93, 0.82, 0.70, 0.56, 0.42
-];
-
-const EV_ARRIVAL_SHAPE = [
-  0.18, 0.15, 0.12, 0.09, 0.07, 0.06,
-  0.07, 0.10, 0.12, 0.10, 0.08, 0.08,
-  0.10, 0.14, 0.20, 0.30, 0.46, 0.68,
-  1.00, 0.95, 0.82, 0.65, 0.48, 0.30
-];
-
-const round = (v: number, digits = 2) => Number(v.toFixed(digits));
-
-function normalizeManual(profile: number[] | null): number[] | null {
-  if (!profile || profile.length !== 24 || profile.some((v) => !Number.isFinite(v) || v < 0)) return null;
-  return profile.map((v) => round(v));
+function slotHour(index: number) {
+  return index / 4;
 }
 
-function isPeakHour(hour: number, start: number, end: number) {
-  if (start === end) return false;
+function inWindow(hour: number, start: number, end: number) {
+  if (start === end) return true;
   if (start < end) return hour >= start && hour < end;
   return hour >= start || hour < end;
 }
 
-export function simulate(inputs: SimulationInputs): SimulationResult {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const manual = normalizeManual(inputs.manualBaseProfile);
+function afterArrivalScore(hour: number, start: number) {
+  const delta = (hour - start + 24) % 24;
+  if (delta < 1) return 1;
+  if (delta < 2) return 0.92;
+  if (delta < 4) return 0.78;
+  if (delta < 6) return 0.58;
+  if (delta < 9) return 0.38;
+  return 0.22;
+}
 
-  const estimatedPeak = Math.max(0, inputs.commonPeakKw + inputs.apartments * inputs.diversifiedUnitKw);
-  const base = manual ?? BASE_SHAPE.map((f) => round(estimatedPeak * f));
+function allocateWeightedEnergy(weights: number[], maxPowerKw: number, energyKwh: number) {
+  const power = Array(weights.length).fill(0);
+  const dt = 0.25;
+  let remaining = Math.max(0, energyKwh);
+  let active = weights.map((w, i) => ({ w, i })).filter((x) => x.w > 0);
 
-  const maxConcurrentEvKw = Math.max(0, inputs.chargerCount * inputs.chargerPowerKw * inputs.simultaneity);
-  const evUnmanaged = EV_ARRIVAL_SHAPE.map((f) => round(maxConcurrentEvKw * f));
-  const totalUnmanaged = base.map((v, i) => round(v + evUnmanaged[i]));
-
-  const reserveLimit = Math.max(0, inputs.contractedDemandKw * (1 - inputs.reserveMargin));
-  const evManaged = Array(24).fill(0) as number[];
-  const requestedEnergy = evUnmanaged.reduce((acc, v) => acc + v, 0);
-
-  if (!inputs.loadBalancing) {
-    evUnmanaged.forEach((v, i) => (evManaged[i] = v));
-  } else if (!inputs.offPeakScheduling) {
-    hours.forEach((h) => {
-      const available = Math.max(0, reserveLimit - base[h]);
-      evManaged[h] = round(Math.min(evUnmanaged[h], available));
-    });
-  } else {
-    let remaining = requestedEnergy;
-    const priority = [...hours].sort((a, b) => {
-      const aOff = isPeakHour(a, inputs.peakStart, inputs.peakEnd) ? 1 : 0;
-      const bOff = isPeakHour(b, inputs.peakStart, inputs.peakEnd) ? 1 : 0;
-      if (aOff !== bOff) return aOff - bOff;
-      const aNightBonus = a <= 6 || a >= 22 ? -1 : 0;
-      const bNightBonus = b <= 6 || b >= 22 ? -1 : 0;
-      if (aNightBonus !== bNightBonus) return aNightBonus - bNightBonus;
-      return base[a] - base[b];
-    });
-
-    for (const h of priority) {
-      if (remaining <= 0.001) break;
-      const available = Math.max(0, reserveLimit - base[h]);
-      const hourCap = Math.min(maxConcurrentEvKw, available);
-      const allocated = Math.min(hourCap, remaining);
-      evManaged[h] = round(allocated);
-      remaining -= allocated;
+  // Distribuição iterativa sem aleatoriedade, limitada pela potência máxima agregada.
+  for (let pass = 0; pass < 8 && remaining > 0.01 && active.length; pass++) {
+    const totalWeight = active.reduce((sum, x) => sum + x.w, 0) || 1;
+    const nextActive: typeof active = [];
+    for (const x of active) {
+      const shareEnergy = remaining * (x.w / totalWeight);
+      const requestedPower = shareEnergy / dt;
+      const headroom = Math.max(0, maxPowerKw - power[x.i]);
+      const addPower = Math.min(headroom, requestedPower);
+      power[x.i] += addPower;
+      if (power[x.i] < maxPowerKw - 0.001) nextActive.push(x);
     }
+    const delivered = power.reduce((sum, p) => sum + p * dt, 0);
+    remaining = Math.max(0, energyKwh - delivered);
+    active = nextActive;
+  }
+  return power;
+}
+
+export function simulateEvs(profile: CurveProfile, inputs: EvInputs): EvSimulationResult {
+  const baseKw = hourlyToQuarter(profile.hourlyKw);
+  const slots = Array.from({ length: 96 }, (_, i) => i / 4);
+  const requestedEnergyKwh = Math.max(0, inputs.chargerCount * inputs.energyPerVehicleKwh);
+  const maxAggregatePowerKw = Math.max(0, inputs.chargerCount * inputs.chargerPowerKw * Math.min(1, Math.max(0, inputs.simultaneity)));
+
+  const unmanagedWeights = slots.map((hour) => {
+    if (!inWindow(hour, inputs.arrivalStart, inputs.departureHour)) return 0;
+    // Entre chegada inicial e final há maior concentração de sessões iniciando.
+    const arrivalWindowBoost = inWindow(hour, inputs.arrivalStart, inputs.arrivalEnd) ? 1.25 : 1;
+    return afterArrivalScore(hour, inputs.arrivalStart) * arrivalWindowBoost;
+  });
+  const evUnmanagedKw = allocateWeightedEnergy(unmanagedWeights, maxAggregatePowerKw, requestedEnergyKwh);
+
+  const effectiveLimit = Math.max(0, inputs.demandLimitKw * (1 - Math.min(0.5, Math.max(0, inputs.reserveMargin))));
+  const managedAvailability = baseKw.map((base, i) => {
+    const hour = slotHour(i);
+    if (!inWindow(hour, inputs.arrivalStart, inputs.departureHour)) return 0;
+    const headroom = inputs.loadBalancing ? Math.max(0, effectiveLimit - base) : maxAggregatePowerKw;
+    return Math.min(maxAggregatePowerKw, headroom);
+  });
+
+  const priority = managedAvailability.map((available, i) => {
+    const hour = slotHour(i);
+    if (available <= 0) return { i, score: -Infinity };
+    let score = available * 10 - baseKw[i];
+    if (inputs.offPeakScheduling) {
+      const isPeak = inWindow(hour, inputs.peakStart, inputs.peakEnd);
+      score += isPeak ? -10000 : 1000;
+      // Horários de madrugada ganham um pequeno bônus para reduzir pico noturno tardio.
+      if (hour >= 0 && hour < 6) score += 150;
+    } else {
+      score -= ((hour - inputs.arrivalStart + 24) % 24) * 0.01;
+    }
+    return { i, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const evManagedKw = Array(96).fill(0);
+  let remaining = requestedEnergyKwh;
+  const dt = 0.25;
+  for (const slot of priority) {
+    if (remaining <= 0.001 || slot.score === -Infinity) break;
+    const p = Math.min(managedAvailability[slot.i], remaining / dt);
+    evManagedKw[slot.i] = p;
+    remaining -= p * dt;
   }
 
-  const totalManaged = base.map((v, i) => round(v + evManaged[i]));
-  const contracted = hours.map(() => inputs.contractedDemandKw);
-  const basePeak = Math.max(...base);
-  const unmanagedPeak = Math.max(...totalUnmanaged);
-  const managedPeak = Math.max(...totalManaged);
-  const criticalHour = totalUnmanaged.indexOf(unmanagedPeak);
-  const unmanagedExceededHours = hours.filter((h) => totalUnmanaged[h] > inputs.contractedDemandKw + 1e-9);
-  const managedExceededHours = hours.filter((h) => totalManaged[h] > inputs.contractedDemandKw + 1e-9);
-  const peakReductionPercent = unmanagedPeak > 0 ? ((unmanagedPeak - managedPeak) / unmanagedPeak) * 100 : 0;
-  const availableAtBasePeak = Math.max(0, inputs.contractedDemandKw - basePeak);
-  const maxSafeSimultaneousChargers = inputs.chargerPowerKw > 0
-    ? Math.max(0, Math.floor((reserveLimit - basePeak) / inputs.chargerPowerKw))
-    : 0;
-  const maxSafeSimultaneity = inputs.chargerCount > 0
-    ? Math.max(0, Math.min(1, maxSafeSimultaneousChargers / inputs.chargerCount))
-    : 0;
-  const delivered = evManaged.reduce((acc, v) => acc + v, 0);
-  const curtailed = Math.max(0, requestedEnergy - delivered);
+  if (!inputs.loadBalancing && !inputs.offPeakScheduling) {
+    for (let i = 0; i < 96; i++) evManagedKw[i] = evUnmanagedKw[i];
+    remaining = Math.max(0, requestedEnergyKwh - evManagedKw.reduce((sum, p) => sum + p * dt, 0));
+  }
+
+  const totalUnmanagedKw = baseKw.map((b, i) => b + evUnmanagedKw[i]);
+  const totalManagedKw = baseKw.map((b, i) => b + evManagedKw[i]);
+  const demandLimitKw = Array(96).fill(inputs.demandLimitKw);
+  const unmanagedPeakKw = Math.max(...totalUnmanagedKw);
+  const managedPeakKw = Math.max(...totalManagedKw);
+  const criticalIndex = totalUnmanagedKw.indexOf(unmanagedPeakKw);
+  const deliveredEnergyKwh = evManagedKw.reduce((sum, p) => sum + p * dt, 0);
+  const unmetEnergyKwh = Math.max(0, requestedEnergyKwh - deliveredEnergyKwh);
 
   return {
-    hours,
-    base,
-    evUnmanaged,
-    totalUnmanaged,
-    evManaged,
-    totalManaged,
-    contracted,
-    basePeak: round(basePeak),
-    unmanagedPeak: round(unmanagedPeak),
-    managedPeak: round(managedPeak),
-    requiredDemandNoManagement: round(unmanagedPeak),
-    criticalHour,
-    unmanagedExceededHours,
-    managedExceededHours,
-    peakReductionPercent: round(peakReductionPercent, 1),
-    availableAtBasePeak: round(availableAtBasePeak),
-    maxSafeSimultaneousChargers,
-    maxSafeSimultaneity: round(maxSafeSimultaneity, 2),
-    evEnergyRequestedKwh: round(requestedEnergy),
-    evEnergyDeliveredKwh: round(delivered),
-    curtailedEnergyKwh: round(curtailed),
-    withinLimit: managedExceededHours.length === 0
+    quarterHours: slots,
+    baseKw: baseKw.map((v) => +v.toFixed(3)),
+    evUnmanagedKw: evUnmanagedKw.map((v) => +v.toFixed(3)),
+    totalUnmanagedKw: totalUnmanagedKw.map((v) => +v.toFixed(3)),
+    evManagedKw: evManagedKw.map((v) => +v.toFixed(3)),
+    totalManagedKw: totalManagedKw.map((v) => +v.toFixed(3)),
+    demandLimitKw,
+    unmanagedPeakKw: +unmanagedPeakKw.toFixed(2),
+    managedPeakKw: +managedPeakKw.toFixed(2),
+    criticalIndex,
+    requestedEnergyKwh: +requestedEnergyKwh.toFixed(2),
+    deliveredEnergyKwh: +deliveredEnergyKwh.toFixed(2),
+    unmetEnergyKwh: +unmetEnergyKwh.toFixed(2),
+    deliveryPercent: requestedEnergyKwh > 0 ? +((deliveredEnergyKwh / requestedEnergyKwh) * 100).toFixed(1) : 100,
+    unmanagedExceededSlots: totalUnmanagedKw.filter((v) => v > inputs.demandLimitKw).length,
+    managedExceededSlots: totalManagedKw.filter((v) => v > inputs.demandLimitKw).length,
+    peakReductionPercent: unmanagedPeakKw > 0 ? +((1 - managedPeakKw / unmanagedPeakKw) * 100).toFixed(1) : 0,
+    maxManagedEvKw: +Math.max(...evManagedKw).toFixed(2)
   };
-}
-
-function extractNumbers(raw: string): number[] {
-  const matches = raw.match(/[-+]?\d+(?:[.,]\d+)?/g) ?? [];
-  return matches.map((v) => Number(v.replace(",", "."))).filter(Number.isFinite);
-}
-
-export function parseProfileText(raw: string): number[] | null {
-  const numbers = extractNumbers(raw);
-  return numbers.length === 24 ? numbers : null;
-}
-
-export function parseCsvProfile(raw: string): number[] | null {
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const pairs: Array<{ hour: number; demand: number }> = [];
-
-  for (const line of lines) {
-    const delimiter = line.includes(";") ? ";" : line.includes("\t") ? "\t" : ",";
-    const cols = line.split(delimiter).map((c) => c.trim());
-    const nums = cols.map((c) => Number(c.replace(",", "."))).filter(Number.isFinite);
-    if (nums.length >= 2) pairs.push({ hour: Math.round(nums[0]), demand: nums[1] });
-  }
-
-  if (pairs.length >= 24) {
-    const profile = Array(24).fill(NaN) as number[];
-    for (const p of pairs) if (p.hour >= 0 && p.hour <= 23) profile[p.hour] = p.demand;
-    if (profile.every(Number.isFinite)) return profile;
-  }
-
-  const allNumbers = extractNumbers(raw);
-  return allNumbers.length === 24 ? allNumbers : null;
 }
