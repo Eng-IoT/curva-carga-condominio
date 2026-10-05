@@ -7,6 +7,7 @@ import { ModuleStepper, type ModuleId } from "@/components/ModuleStepper";
 import { curveMetrics, estimatedProfile, manualProfile, parseManualText, parseMeasuredCsv } from "@/lib/curve";
 import { dimensionElectrical } from "@/lib/electrical";
 import { simulateEvs } from "@/lib/simulation";
+import { generateTechnicalPdf, openPrintableTechnicalReport } from "@/lib/report";
 import type { CurveProfile, ElectricalInputs, EvInputs, ProjectInfo } from "@/lib/types";
 
 const DEFAULT_PROJECT: ProjectInfo = {
@@ -75,6 +76,7 @@ export default function Home() {
   const [ev, setEv] = useState<EvInputs>(DEFAULT_EV);
   const [electricalInputs, setElectricalInputs] = useState<ElectricalInputs>(DEFAULT_ELECTRICAL);
   const [reportBusy, setReportBusy] = useState(false);
+  const [reportMessage, setReportMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -180,13 +182,32 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
+  const reportData = { project, curve: profile, curveMetrics: metrics, evInputs: ev, simulation, electricalInputs, electrical };
+
   const generatePdf = async () => {
     setReportBusy(true);
+    setReportMessage("");
     try {
-      const { generateTechnicalPdf } = await import("@/lib/report");
-      generateTechnicalPdf({ project, curve: profile, curveMetrics: metrics, evInputs: ev, simulation, electricalInputs, electrical });
+      const filename = await generateTechnicalPdf(reportData);
+      setReportMessage(`PDF gerado: ${filename}. Verifique a pasta de downloads do navegador.`);
+    } catch (error) {
+      console.error("Falha ao gerar PDF", error);
+      const message = error instanceof Error ? error.message : "Falha desconhecida ao gerar o PDF.";
+      setReportMessage(`Não foi possível baixar o PDF diretamente: ${message} Use a versão imprimível abaixo.`);
     } finally {
       setReportBusy(false);
+    }
+  };
+
+  const openPrintableReport = () => {
+    setReportMessage("");
+    try {
+      openPrintableTechnicalReport(reportData);
+      setReportMessage("Relatório aberto em nova aba. Clique em ‘Salvar / Imprimir PDF’ e escolha ‘Salvar como PDF’.");
+    } catch (error) {
+      console.error("Falha ao abrir relatório imprimível", error);
+      const message = error instanceof Error ? error.message : "Falha desconhecida.";
+      setReportMessage(message);
     }
   };
 
@@ -495,8 +516,10 @@ export default function Home() {
                 <Field label="Responsável técnico"><input value={project.responsible} onChange={(e) => setProject((s) => ({ ...s, responsible: e.target.value }))} /></Field>
                 <Field label="CREA / CFT / registro"><input value={project.registration} onChange={(e) => setProject((s) => ({ ...s, registration: e.target.value }))} /></Field>
               </div>
-              <button className="primaryBtn pdfBtn" onClick={generatePdf} disabled={reportBusy}>{reportBusy ? "Gerando PDF..." : "▤ Gerar relatório técnico PDF"}</button>
-              <div className="notice"><b>Rastreabilidade</b><p>O PDF registra premissas, resultados, notas técnicas e ressalvas de validação. Isso reduz o risco de apresentar um dimensionamento sem contexto.</p></div>
+              <button className="primaryBtn pdfBtn" onClick={generatePdf} disabled={reportBusy}>{reportBusy ? "Gerando PDF..." : "▤ Baixar relatório técnico PDF"}</button>
+              <button className="secondaryBtn" onClick={openPrintableReport}>Abrir versão imprimível / Salvar como PDF</button>
+              {reportMessage ? <div className="notice"><b>Relatório</b><p>{reportMessage}</p></div> : null}
+              <div className="notice"><b>Rastreabilidade</b><p>O relatório registra premissas, resultados, memória de cálculo e ressalvas. A versão imprimível funciona como alternativa quando o navegador bloquear downloads automáticos.</p></div>
             </aside>
           </section>
         ) : null}
