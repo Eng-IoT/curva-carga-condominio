@@ -1,14 +1,14 @@
 {
-  "name": "curva-carga-condominio",
-  "version": "1.0.0",
+  "name": "curva-carga-condominio-v2",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "next start"
   },
   "dependencies": {
+    "jspdf": "4.2.1",
     "next": "15.5.27",
     "react": "19.1.5",
     "react-dom": "19.1.5"

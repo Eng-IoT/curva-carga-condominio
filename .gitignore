@@ -4,5 +4,5 @@ out
 .env
 .env.local
 .vercel
-*.log
 .DS_Store
+*.log

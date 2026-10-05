@@ -1,52 +1,49 @@
-# Curva de Carga para Condomínios
+# Curva de Carga para Condomínios — V2
 
-Ferramenta digital em **Next.js + React + TypeScript** para simular a curva de carga de condomínios com infraestrutura de recarga de veículos elétricos.
+Aplicação web em **Next.js + React + TypeScript** para apoiar estudos de infraestrutura de recarga de veículos elétricos em condomínios.
 
-## Funcionalidades
+## Quatro módulos reais da V2
 
-- Geração de curva base estimada a partir de:
-  - quantidade de apartamentos;
-  - demanda diversificada por unidade;
-  - pico de áreas comuns.
-- Entrada de curva real/manual com 24 valores horários.
-- Importação de CSV com 24 pontos ou colunas `hora;demanda`.
-- Simulação de carregadores EV considerando:
-  - potência por carregador;
-  - quantidade de carregadores;
-  - fator de simultaneidade;
-  - horário de ponta;
-  - margem de reserva;
-  - load balancing;
-  - recarga programada fora de ponta.
-- Comparação de três curvas:
-  - carga base;
-  - total sem gerenciamento;
-  - total com gerenciamento.
-- Indicadores automáticos:
-  - pico de demanda;
-  - horas acima da demanda contratada;
-  - redução de pico;
-  - máximo simultâneo seguro estimado;
-  - simultaneidade segura estimada;
-  - energia EV solicitada, atendida e não atendida.
-- Exportação dos resultados em CSV.
-- Dados persistidos no navegador via `localStorage`.
-- Layout responsivo para desktop, tablet e smartphone.
+1. **Curva medida**
+   - Importação CSV (`hora;demanda_kw`, `timestamp;demanda_kw` ou 24 valores).
+   - Curva estimada apenas para estudo preliminar.
+   - Indicadores: pico, média, mínima, energia diária equivalente, fator de carga e qualidade do dado.
 
-## Instalação local
+2. **Simulação dos EVs**
+   - Quantidade/potência dos carregadores.
+   - Energia diária por veículo, simultaneidade, chegada e saída.
+   - Cenário sem gerenciamento.
+   - Load balancing e priorização fora de ponta.
+   - Energia solicitada, atendida e não atendida.
+   - Curva de 15 minutos e exportação CSV.
 
-Requisitos: Node.js 20+ e npm.
+3. **Dimensionamento elétrico preliminar**
+   - Corrente de projeto mono/bifásica ou trifásica.
+   - Coordenação `Ib ≤ In ≤ Iz`.
+   - Pré-seleção de cabo e disjuntor.
+   - Fatores de temperatura e agrupamento.
+   - Queda de tensão.
+   - Condutor PE.
+   - Verificação `Icu ≥ Icc disponível`.
+   - Orientação de proteção diferencial em função da detecção CC do EVSE.
+
+4. **Relatório técnico PDF**
+   - Capa e identificação do projeto.
+   - Origem/qualidade da curva.
+   - Gráfico da curva de carga.
+   - Simulação EV.
+   - Memória de cálculo.
+   - Cabos, disjuntores, queda de tensão, PE e Icu/Icc.
+   - Recomendações, ressalvas e referências para validação.
+
+## Execução local
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abra:
-
-```text
-http://localhost:3000
-```
+Abra `http://localhost:3000`.
 
 ## Build de produção
 
@@ -55,51 +52,51 @@ npm run build
 npm start
 ```
 
-## Publicar no GitHub
+## Deploy na Vercel
 
-```bash
-git init
-git add .
-git commit -m "feat: simulador de curva de carga condominial"
-git branch -M main
-git remote add origin https://github.com/SEU-USUARIO/curva-carga-condominio.git
-git push -u origin main
-```
+1. Envie o projeto para um repositório no GitHub.
+2. Na Vercel, escolha **Add New → Project**.
+3. Importe o repositório.
+4. Framework: **Next.js**.
+5. Execute o deploy. Não há variáveis de ambiente nesta V2.
 
-## Publicar na Vercel
+## Formato CSV
 
-1. Faça o push do projeto para o GitHub.
-2. Acesse a Vercel.
-3. Clique em **Add New > Project**.
-4. Importe o repositório.
-5. Framework detectado: **Next.js**.
-6. Clique em **Deploy**.
-
-Nenhuma variável de ambiente é necessária nesta versão.
-
-## Formato CSV aceito
-
-### Opção 1 — 24 linhas
+Exemplo simples:
 
 ```csv
-hora;demanda
-0;18
-1;17
-2;16
+hora;demanda_kw
+0;28
+1;26
+2;25
 ...
-23;22
+23;34
 ```
 
-### Opção 2 — 24 valores
+Também é aceito `timestamp;demanda_kw`. Quando há vários dias, a V2 calcula o perfil horário pela média dos registros de cada hora e informa a quantidade de dias detectada.
 
-```text
-18;17;16;15;15;16;20;28;34;36;35;34;33;34;35;38;42;48;52;54;50;44;36;22
-```
+Um modelo está disponível em `public/exemplo-curva-24h.csv`.
 
-## Nota técnica
+## Premissas de engenharia
 
-A ferramenta é destinada a **estudo e pré-dimensionamento**. O modo estimado não substitui medições reais. Para projetos executivos, utilize curvas obtidas por analisador de energia, medidores inteligentes ou dados da concessionária e valide os resultados conforme as normas aplicáveis e os requisitos da distribuidora.
+O dimensionamento é **preliminar**. A tabela interna de capacidade de condução foi implementada de forma conservadora apenas para apoiar a seleção inicial. Antes de executar a instalação, o responsável técnico deve validar, na documentação vigente e aplicável:
 
-## Versões recomendadas para deploy (out/2026)
+- ABNT NBR 5410;
+- ABNT NBR 17019;
+- série ABNT NBR IEC 61851;
+- NR-10;
+- requisitos da distribuidora local;
+- manual e datasheet do EVSE;
+- método real de instalação, fatores de correção, queda de tensão, curto-circuito, seletividade, DR, DPS, aterramento e equipotencialização.
 
-Este projeto usa Next.js 15.5.27 (Maintenance LTS) e React/React DOM 19.1.5 para evitar vulnerabilidades conhecidas nas versões antigas usadas inicialmente.
+**Icu não é a corrente de curto-circuito da instalação.** A V2 compara a Icc disponível informada pelo projetista com o Icu do dispositivo informado.
+
+## Tecnologias
+
+- Next.js 15.5.27 (Maintenance LTS)
+- React 19.1.5
+- TypeScript
+- jsPDF 4.2.1
+- SVG nativo para gráficos interativos
+- LocalStorage para persistência local do cenário
+
