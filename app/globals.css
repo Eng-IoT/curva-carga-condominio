@@ -31,7 +31,7 @@ button { cursor: pointer; }
 .sidebarNote { margin-top: auto; padding: 14px; border: 1px solid rgba(255,146,61,.23); background: rgba(255,146,61,.05); border-radius: 14px; }
 .sidebarNote b { color: #ffd0a9; }.sidebarNote p { color: var(--muted); font-size: 12px; line-height: 1.55; margin-bottom: 0; }
 .content { min-width: 0; padding: 32px; max-width: 1700px; width: 100%; margin: 0 auto; }
-.hero { display: flex; justify-content: space-between; gap: 26px; align-items: end; margin-bottom: 22px; }
+.hero { display: flex; justify-content: space-between; gap: 26px; align-items: flex-end; margin-bottom: 22px; }
 .eyebrow { font-size: 11px; letter-spacing: .16em; color: var(--green); }
 .hero h1 { margin: 7px 0 4px; font-size: clamp(30px, 3.4vw, 54px); line-height: .98; letter-spacing: -.04em; }.hero h1 em { font-style: normal; color: var(--green); }.hero p { color: var(--muted); margin: 9px 0 0; max-width: 820px; }
 .statusBadge { min-width: 250px; display: flex; align-items: center; gap: 13px; padding: 14px 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
