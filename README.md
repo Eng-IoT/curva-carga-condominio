@@ -99,3 +99,7 @@ hora;demanda
 ## Nota técnica
 
 A ferramenta é destinada a **estudo e pré-dimensionamento**. O modo estimado não substitui medições reais. Para projetos executivos, utilize curvas obtidas por analisador de energia, medidores inteligentes ou dados da concessionária e valide os resultados conforme as normas aplicáveis e os requisitos da distribuidora.
+
+## Versões recomendadas para deploy (out/2026)
+
+Este projeto usa Next.js 15.5.27 (Maintenance LTS) e React/React DOM 19.1.5 para evitar vulnerabilidades conhecidas nas versões antigas usadas inicialmente.
