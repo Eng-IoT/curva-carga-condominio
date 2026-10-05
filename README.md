@@ -100,3 +100,12 @@ O dimensionamento é **preliminar**. A tabela interna de capacidade de conduçã
 - SVG nativo para gráficos interativos
 - LocalStorage para persistência local do cenário
 
+
+## V2.1 — correção do relatório PDF
+
+Esta versão corrige a geração de relatórios no navegador e adiciona duas rotas de saída:
+
+- **Baixar relatório técnico PDF**: gera o PDF no navegador e força o download por Blob.
+- **Abrir versão imprimível / Salvar como PDF**: abre um relatório HTML completo em nova aba, com gráfico, tabelas e memória de cálculo, permitindo usar a opção nativa **Salvar como PDF** do navegador.
+
+A interface também exibe mensagens de sucesso/erro quando o navegador bloquear downloads ou pop-ups.
